@@ -68,7 +68,7 @@
     if(!upload)files['site-bundle.js']='globalThis.CLOCKTOWER_SITE_BUNDLE='+JSON.stringify(base)+';\n';
     const archive=zip(files);
     if(upload&&archive.size>25000000)throw Error('当前上传包超过25MB，请减少剧本数量后再导出。');
-    download(upload?'钟楼推理_含剧本上传版.zip':'钟楼推理_含剧本网页版.zip',archive,'application/zip');
+    download(upload?'枫丹审判庭_含剧本上传版.zip':'枫丹审判庭_含剧本网页版.zip',archive,'application/zip');
   }
   function open(onPlay,onChange){
     const dialog=document.querySelector('#workshop');let editing=null;
