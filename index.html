@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#102438">
+  <meta name="description" content="枫丹审判庭的圆桌上，每一句证词都可能是谎言。翻开角色、核对线索，找出全部魔物。">
+  <title>钟楼推理 · 枫丹之夜</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="layout.css">
+</head>
+<body>
+  <div class="scene" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+  <header class="topbar">
+    <button id="home" class="brand" aria-label="返回难度选择"><span class="brand-seal">♜</span><span>钟楼推理<small>FONTAINE · NOCTURNE</small></span></button>
+    <nav aria-label="游戏导航">
+      <button data-action="book" class="nav-button"><span aria-hidden="true">◇</span> 角色图鉴 <small id="role-total">48</small></button>
+      <button data-action="rules" class="nav-button">游戏规则</button>
+      <button id="sound" class="icon-button" aria-label="开启音效" title="开启音效">♪<span class="off-dot"></span></button>
+      <button id="fullscreen" class="icon-button" aria-label="切换全屏" title="切换全屏">⛶</button>
+    </nav>
+  </header>
+  <link rel="stylesheet" href="workshop.css">
+  <main id="app"></main>
+  <aside id="roster-tooltip" class="roster-tooltip" role="tooltip" hidden></aside>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="modal" aria-labelledby="modal-title"></dialog>
+  <dialog id="catalogue" aria-labelledby="catalogue-title"></dialog>
+  <dialog id="workshop" aria-label="自定义剧本"></dialog>
+  <div id="reveal-overlay" class="reveal-overlay" hidden></div>
+  <footer class="page-footer"><span>枫丹审判庭 · 圆桌调查</span><span>每一句证词，都值得再听一次。</span></footer>
+  <script src="data.js"></script>
+  <script src="engine.js"></script>
+  <script src="scripts.js"></script>
+  <script src="site-files.js"></script>
+  <script src="workshop.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
