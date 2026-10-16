@@ -67,17 +67,17 @@
     files['scripts.js']='globalThis.CLOCKTOWER_SCRIPTS='+JSON.stringify(all())+';\n';
     if(!upload)files['site-bundle.js']='globalThis.CLOCKTOWER_SITE_BUNDLE='+JSON.stringify(base)+';\n';
     const archive=zip(files);
-    if(upload&&archive.size>25000000)throw Error('当前上传包超过25MB，请减少剧本数量后再导出。');
+    if(upload&&Object.values(files).some(file=>(typeof file==='string'?encoder.encode(file).length:file.length)>25000000))throw Error('上传包中有单个文件超过25MB。');
     download(upload?'枫丹审判庭_含剧本上传版.zip':'枫丹审判庭_含剧本网页版.zip',archive,'application/zip');
   }
   function open(onPlay,onChange){
     const dialog=document.querySelector('#workshop');let editing=null;
     const render=()=>{
-      dialog.innerHTML=`<button class="dialog-close" data-workshop-close aria-label="关闭">×</button><div class="eyebrow">SCRIPT WORKSHOP</div><h2>自定义剧本</h2><p>选择本次可登场的角色，再设置冒险者、NPC、喽喽和强敌的数量。开局从角色池随机抽取。</p><div class="workshop-toolbar"><button class="secondary-button" id="script-new">新建剧本</button><label class="secondary-button">导入剧本<input id="script-import" type="file" accept=".json,application/json" hidden></label><button class="secondary-button" id="site-export-upload">导出上传版（25MB内）</button><button class="secondary-button" id="site-export">导出完整版</button></div><p class="workshop-message" role="status"></p><div class="script-library">${all().map(s=>`<article><div><strong>${esc(s.name)}</strong><small>${s.seats}人 · ${s.hp}点生命</small></div><div><button data-play="${s.id}">开局</button><button data-edit="${s.id}">编辑</button><button data-export="${s.id}">导出剧本</button><button data-delete="${s.id}">删除</button></div></article>`).join('')||'<p>暂无保存的剧本。导出的网页版会包含这里保存的全部剧本，上传腾讯云后其他玩家也能看到。</p>'}</div><form id="script-editor" hidden></form>`;
+      dialog.innerHTML=`<button class="dialog-close" data-workshop-close aria-label="关闭">×</button><div class="eyebrow">SCRIPT WORKSHOP</div><h2>自定义剧本</h2><p>选择本次可登场的角色，再设置冒险者、NPC、喽喽和强敌的数量。开局从角色池随机抽取。</p><div class="workshop-toolbar"><button class="secondary-button" id="script-new">新建剧本</button><label class="secondary-button">导入剧本<input id="script-import" type="file" accept=".json,application/json" hidden></label><button class="secondary-button" id="site-export-upload">导出上传版</button><button class="secondary-button" id="site-export">导出完整版</button></div><p class="workshop-message" role="status"></p><div class="script-library">${all().map(s=>`<article><div><strong>${esc(s.name)}</strong><small>${s.seats}人 · ${s.hp}点生命</small></div><div><button data-play="${s.id}">开局</button><button data-edit="${s.id}">编辑</button><button data-export="${s.id}">导出剧本</button><button data-delete="${s.id}">删除</button></div></article>`).join('')||'<p>暂无保存的剧本。导出的网页版会包含这里保存的全部剧本，上传腾讯云后其他玩家也能看到。</p>'}</div><form id="script-editor" hidden></form>`;
       dialog.querySelector('[data-workshop-close]').onclick=()=>dialog.close();
       const message=t=>dialog.querySelector('.workshop-message').textContent=t;
       dialog.querySelector('#script-new').onclick=()=>edit(null);
-      dialog.querySelector('#site-export-upload').onclick=async()=>{try{message('正在打包上传版与已保存剧本……');await exportSite(true);message('已导出25MB内的上传包。可上传ZIP或解压后的文件夹；部署后仍可导出剧本和网页版。');}catch(e){message(e.message);}};
+      dialog.querySelector('#site-export-upload').onclick=async()=>{try{message('正在打包上传版与已保存剧本……');await exportSite(true);message('已导出上传包。若平台限制ZIP大小，请解压后上传文件夹；部署后仍可导出剧本和网页版。');}catch(e){message(e.message);}};
       dialog.querySelector('#site-export').onclick=async()=>{try{message('正在打包剧本与游戏资源……');await exportSite();message('已导出。解压后将全部文件上传腾讯云，访客即可选择保存的剧本。');}catch(e){message(e.message);}};
       dialog.querySelector('#script-import').onchange=async e=>{try{const value=JSON.parse(await e.target.files[0].text());const values=Array.isArray(value)?value:[value];const valid=values.map(validate);valid.forEach(save);onChange?.();render();message('已导入'+valid.length+'个剧本。');}catch(e){message('导入失败：'+e.message);}};
       dialog.querySelectorAll('[data-play]').forEach(b=>b.onclick=()=>{dialog.close();onPlay(library.get(b.dataset.play));});
@@ -87,7 +87,7 @@
     };
     const edit=value=>{
       editing=value;const form=dialog.querySelector('#script-editor');form.hidden=false;
-      const selected=value?.roleIds||roles.filter(r=>r.initial!==false).map(r=>r.id);
+      const selected=value?.roleIds||[];
       const quantities=value?.quantities||{'冒险者':5,'NPC':1,'喽喽':1,'强敌':1};
       form.innerHTML=`<h3>${value?'编辑剧本':'新建剧本'}</h3><div class="script-fields"><label>名称<input name="name" required maxlength="60" value="${esc(value?.name||'我的剧本')}"></label><label>人数<input name="seats" type="number" min="2" max="24" value="${value?.seats||8}" required></label><label>生命值<input name="hp" type="number" min="1" max="99" value="${value?.hp||10}" required></label></div><p id="script-total"></p>${['冒险者','NPC','喽喽','强敌'].map(type=>`<h4>${type} <label>数量 <input data-quantity="${type}" type="number" min="0" max="24" value="${quantities[type]}"></label></h4><div class="script-roles">${roles.filter(r=>r.type===type).map(r=>`<label title="${esc(r.effect)}"><span>${esc(r.name)}${r.initial===false?'（仅转化）':''}</span><input data-role="${r.id}" type="checkbox" ${selected.includes(r.id)?'checked':''} ${r.initial===false?'disabled':''}></label>`).join('')}</div>`).join('')}<p class="script-error" role="alert"></p><button class="ornate-button" type="submit">保存剧本</button>`;
       const total=()=>form.querySelector('#script-total').textContent='已配置 '+[...form.querySelectorAll('[data-quantity]')].reduce((n,e)=>n+Number(e.value),0)+' / '+form.elements.seats.value+' 名角色';

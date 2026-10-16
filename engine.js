@@ -9,7 +9,7 @@
     constructor(difficulty = 'easy', seed = Date.now(), fixture = null, script = null) {
       this.seed = ((Math.floor(seed) % 2147483646) + 2147483646) % 2147483646 + 1;
       this.seats = []; this.logs = [];
-      this.phase = 'playing'; this.flips = 0; this.turn = 0; this.difficulty = difficulty; this.onceUsageVersion = 1;
+      this.phase = 'playing'; this.flips = 0; this.turn = 0; this.difficulty = difficulty; this.onceUsageVersion = 1;this.realNightCount=0;
       this.script = script ? GameEngine.validateScript(script) : null;
       this.hp = this.maxHp;
       if (fixture) this.seats = copy(fixture.map(s => typeof s === 'string' ? {role:s} : s));
@@ -30,7 +30,7 @@
         take('冒险者', cfg.seats - cfg.minions - cfg.bosses - npcs, cfg.adventurers);
         this.seats = this.shuffle(ids).map(role => ({role}));
       }
-      this.setup(); this.startingRoles=this.seats.map(s=>s.role);this.log('调查开始：先翻开角色，交叉核对发言，再处决可疑目标。');this.startAbilities();this.roster();
+      this.applySignora();this.setup(); this.startingRoles=this.seats.map(s=>s.role);this.log('调查开始：先翻开角色，交叉核对发言，再处决可疑目标。');this.startAbilities();this.roster();
     }
     s(i) { return this.seats[i - 1]; }
     random(n) { this.seed = (this.seed * 48271) % 2147483647; return this.seed % n + 1; }
@@ -41,7 +41,7 @@
     wrongMask(real) { const scope=this.informationRoles(),goodChoices=scope.filter(r=>good(r.id)&&r.id!==real);return this.pick((goodChoices.length?goodChoices:scope.filter(r=>r.id!==real)).map(r=>r.id)); }
     log(text) { this.logs.push(text); }
     neighbors(i) { const n=this.seats.length; return [(i+n-2)%n+1,i%n+1]; }
-    evil(i, perceived=false) { return !good(this.s(i).role)&&!(perceived&&this.s(i).role==='childe'); }
+    evil(i, perceived=false) { const actual=!good(this.s(i).role);if(!perceived)return actual;if(this.hasAbility(i,'hitotsume')&&this.canAct(i))return true;return actual&&this.s(i).role!=='childe'; }
     aliveList(predicate=()=>true) { return this.seats.flatMap((s,j)=>s.alive&&predicate(j+1,s)?[j+1]:[]); }
     bossPoisoned(i) { return !this.evil(i)&&this.seats.some((s,j)=>s.alive&&s.role==='shouki'&&!s.drunk&&!s.poisoned&&(j+1)%2!==i%2); }
     rayPoisoned(i) { return this.seats.some(s=>s.alive&&s.role==='hunters_ray'&&s.rayTarget===i); }
@@ -52,16 +52,17 @@
     lies(i) {
       if(this.truthProtected(i))return false;
       if(this.s(i).role==='hunters_ray')return this.disabled(i);
-      return this.evil(i)||this.disabled(i)||this.seats.some((s,j)=>this.effective(j+1)&&(s.role==='shunji'&&s.novelTarget===i||s.role==='whopperflower'&&(j+1)%this.seats.length+1===i));
+      return this.evil(i)||this.disabled(i)||this.s(i).lynetteMask&&!this.retainsMask(i)||this.seats.some((s,j)=>this.effective(j+1)&&(s.role==='shunji'&&this.hasAbility(j+1,'shunji')&&s.novelTarget===i||s.role==='whopperflower'&&(j+1)%this.seats.length+1===i));
     }
     informationEvil(observer,target) { return this.evil(target,!this.lies(observer)); }
-    canAct(i) { return this.effective(i)&&(!this.evil(i)||this.s(i).role==='hunters_ray'); }
+    canAct(i) { return this.effective(i)&&(!this.evil(i)||this.s(i).role==='hunters_ray')&&(!this.s(i).lynetteMask||this.retainsMask(i)); }
     mask(i) { const s=this.s(i); return s.role==='pyro_slime'?'pyro_slime':s.mad?s.madMask:s.disguise; }
-    abilityRole(i) { const s=this.s(i);if(s.role==='pyro_slime')return 'pyro_slime';if(s.exchangedGood&&rules.lyneyAfterSwap==='real-role'&&s.role!=='yae'){if(s.role==='hanachirusato')return s.inheritedRole==='yae'?this.mask(i):s.inheritedRole||s.role;return s.role;}return this.mask(i); }
+    abilityRole(i) { const s=this.s(i);if(s.role==='pyro_slime')return 'pyro_slime';if(s.lynetteMask)return this.mask(i);if(s.exchangedGood&&rules.lyneyAfterSwap==='real-role'&&s.role!=='yae'){if(s.role==='hanachirusato')return s.inheritedRole==='yae'?this.mask(i):s.inheritedRole||s.role;return s.role;}return this.mask(i); }
     innateRole(i) { const s=this.s(i);return s.role==='hunters_ray'&&s.inheritedRole?s.inheritedRole:s.role==='hanachirusato'&&(s.mad||s.exchangedGood)?s.inheritedRole||s.madMask:s.role; }
-    hasAbility(i,id) { const s=this.s(i),retained=s.role==='yae'||s.role==='hunters_ray'||s.role==='hanachirusato'&&(s.mad||s.exchangedGood);return this.innateRole(i)===id||retained&&this.abilityRole(i)===id; }
+    retainsMask(i) { const s=this.s(i);return s.role==='yae'||s.role==='hunters_ray'||s.role==='hanachirusato'&&(s.mad||s.exchangedGood); }
+    hasAbility(i,id) { const s=this.s(i),retained=this.retainsMask(i);if(s.lynetteMask&&!retained)return false;return this.innateRole(i)===id||retained&&this.abilityRole(i)===id; }
     blocked(i) {
-      return (this.mask(i)==='kujirai'&&(rules.whaleAlwaysBlocked||!this.disabled(i)))||this.seats.some((s,j)=>s.role==='cryo'&&this.effective(j+1)&&s.frozenTarget===i);
+      return (this.mask(i)==='kujirai'&&(rules.whaleAlwaysBlocked||!this.disabled(i)))||this.seats.some((s,j)=>this.effective(j+1)&&(s.role==='cryo'&&s.frozenTarget===i||s.role==='cryo_regisvine'&&s.frozenTargets?.includes(i)||this.abilityRole(j+1)==='dori'&&s.doriTarget===i));
     }
     checkEnd() {
       if(this.phase!=='playing')return;
@@ -69,12 +70,23 @@
       else if(!this.aliveList(i=>this.evil(i)).length){this.phase='won';this.log('所有魔物已被清除，天理阵营获胜。');}
     }
     damage(n, why) { this.hp=Math.max(0,this.hp-n);this.log(`${why}，失去${n}点生命。`); }
+    applySignora() {
+      const ladies=this.seats.filter(s=>s.role==='signora').length;if(!ladies)return;
+      const quota=Math.floor(this.seats.length/2)+1-ladies,minions=this.seats.filter(s=>roles[s.role].type==='喽喽');
+      if(minions.length>quota)throw Error('女士配板的喽喽数量超过允许的愚人众数量。');
+      const convert=s=>{const from=s.role;for(const key of Object.keys(s))delete s[key];s.role='fatui';s.signoraFrom=from;};
+      minions.forEach(s=>{if(s.role!=='fatui')convert(s);});
+      let remaining=quota-minions.length;
+      for(const type of ['NPC','冒险者'])for(const s of this.shuffle(this.seats.map((s,j)=>({seat:j,type:roles[s.role].type})).filter(s=>s.type===type))){if(remaining<=0)break;convert(this.seats[s.seat]);remaining--;}
+      if(remaining)throw Error('女士配板缺少足够的NPC或冒险者用于转化。');
+    }
     setup() {
       const adventurers=this.pool('冒险者',this.script?.roleIds);
       const masks=[...adventurers,...this.pool('NPC',this.script?.roleIds).filter(id=>id!=='jack')];
       // Real lineup membership, not another evil player's disguise, permits an NPC mask.
       const present=new Set(this.seats.map(s=>s.role));
       const evilMasks=masks.filter(id=>roles[id].type!=='NPC'||present.has(id));
+      if(this.seats.some(s=>!good(s.role)&&s.role!=='pyro_slime')&&!evilMasks.length)throw Error('配板转化后没有可用的伪装身份，请勾选至少一名冒险者。');
       this.seats.forEach(s=>{
         Object.assign(s,{alive:true,revealed:false,used:false,speech:null,history:[],death:null});
         if(s.role==='arataki')s.aratakiOriginal=!s.formerRole;
@@ -107,6 +119,7 @@
       this.seats.forEach((s,j)=>{
         if(s.role==='dendro'&&this.effective(j+1)){const t=this.pick(this.neighbors(j+1).filter(i=>!this.evil(i)));if(t)this.s(t).poisoned=true;}
         else if(s.role==='cryo')s.frozenTarget=this.pick(this.aliveList());
+        else if(s.role==='cryo_regisvine')s.frozenTargets=this.shuffle([...new Set([j+1,...this.neighbors(j+1)])]).slice(0,2);
         else if(s.role==='shunji')s.novelTarget=this.pick(this.neighbors(j+1));
       });
     }
@@ -116,7 +129,7 @@
       return {id:'custom',name:s.name,seats:s.seats,hp:s.hp,minions:q['喽喽'],bosses:q['强敌'],npcs:q.NPC,adventurers:of('冒险者'),npcPool:of('NPC'),minionPool:of('喽喽'),bossPool:of('强敌')};
     }
     static fromScript(script,seed=Date.now()) { return new GameEngine('custom',seed,null,script); }
-    unmaskSlime(s) { s.disguise='pyro_slime';s.mad=false;s.madMask=null;delete s.inheritedRole;delete s.rayTarget;delete s.frozenTarget;delete s.novelTarget;delete s.yaeMask;delete s.yaeDisguised;if(s.speech?.kind!=='pyro_slime')s.speech=null; }
+    unmaskSlime(s) { s.disguise='pyro_slime';s.mad=false;s.madMask=null;delete s.inheritedRole;delete s.rayTarget;delete s.frozenTarget;delete s.frozenTargets;delete s.doriTarget;delete s.lynetteMask;delete s.novelTarget;delete s.yaeMask;delete s.yaeDisguised;if(s.speech?.kind!=='pyro_slime')s.speech=null; }
     startAbilities() {
       const actors=this.aliveList(i=>['klee','paimon'].includes(this.abilityRole(i)));
       for(const i of actors){
@@ -188,6 +201,20 @@
     speak(i, kind=this.abilityRole(i), targets=[], repeatOnly=false) {
       if(this.s(i).role==='pyro_slime'){kind='pyro_slime';targets=[];}
       if(roles[kind].targets&&!targets.length)return this.saveSpeech(i,'选择目标后，可以使用我的主动能力。',null,kind);
+      if(kind==='dori')return this.boolSpeech(i,this.informationEvil(i,targets[0]),`${targets[0]}号是邪恶阵营。`,`${targets[0]}号是善良阵营。`,kind,targets);
+      if(kind==='xianyun'){
+        const group=[i,...this.neighbors(i)],n=new Set(group.map(j=>roles[this.s(j).role].type)).size,answer=this.lies(i)?this.pick([1,2,3].filter(v=>v!==n)):n;
+        return this.saveSpeech(i,`自己与邻座${this.neighbors(i).join('号和')}号的角色中有${answer}种角色类型。`,answer===n,kind,group);
+      }
+      if(kind==='emilie'){
+        const candidates=this.aliveList(j=>j!==i),groups=[],lying=this.lies(i);
+        for(let a=0;a<candidates.length;a++)for(let b=a+1;b<candidates.length;b++)for(let c=b+1;c<candidates.length;c++){
+          const group=[candidates[a],candidates[b],candidates[c]],n=group.filter(j=>this.lies(j)).length;
+          if(lying?n!==1:n===1)groups.push(group);
+        }
+        const group=this.pick(groups);
+        return group?this.saveSpeech(i,`${group.join('号、')}号中有且只有一人在说谎。`,!lying,kind,group):this.saveSpeech(i,'无人说谎。',candidates.every(j=>!this.lies(j)),kind);
+      }
       if(kind==='arataki'){
         const s=this.s(i),original=s.role==='arataki'&&s.aratakiOriginal;
         if(original&&this.canAct(i)){
@@ -271,34 +298,46 @@
       return this.saveSpeech(i,'我没有在翻开时提供线索的能力。',null,kind);
     }
     cure(i,madness=false) { const s=this.s(i);s.drunk=false;s.poisoned=false;if(madness){s.mad=false;s.madMask=null;} }
-    reSpeak(i) { const s=this.s(i);if(!s.revealed)return;const old=s.speech,id=this.abilityRole(i);if(old?.kind===id&&old.targets.length&&['barbara','mona','layla','connor','kirara'].includes(old.kind)){if(old.kind==='barbara'&&!this.s(old.targets[0]).speech)return;this.speak(i,old.kind,old.targets,true);}else this.speak(i,id,[],true); }
+    reSpeak(i) { const s=this.s(i);if(!s.revealed)return;const old=s.speech,id=this.abilityRole(i);if(old?.kind===id&&old.targets.length&&['barbara','mona','layla','connor','kirara','dori'].includes(old.kind)){if(old.kind==='barbara'&&!this.s(old.targets[0]).speech)return;this.speak(i,old.kind,old.targets,true);}else this.speak(i,id,[],true); }
     nightImmune(i) { return this.hasAbility(i,'qiqi')&&this.canAct(i); }
-    kill(i,cause,reveal=false) {
+    evilKillProtected(i) { return this.neighbors(i).some(j=>this.hasAbility(j,'escoffier')&&this.canAct(j)); }
+    kill(i,cause,reveal=false,attacker=null) {
       const s=this.s(i);if(!s?.alive)return false;
+      if((cause==='night'&&this.nightImmune(i))||((attacker!==null&&this.evil(attacker)||['night','kairagi','fatui'].includes(cause))&&this.evilKillProtected(i))){this.log(`${i}号受到保护，未被击杀。`);return false;}
       s.deathMask=this.mask(i);s.deathVersion=(s.deathVersion||0)+1;s.alive=false;s.death=cause;if(reveal)s.executionKnown=true;
-      this.log(`${i}号${cause==='night'?'在夜晚遇害':'被海乱鬼击杀'}。`);
+      this.log(`${i}号${cause==='night'?'在夜晚遇害':cause==='fatui'?'被愚人众击杀':'被海乱鬼击杀'}。`);
       if(cause==='night')for(const j of this.aliveList(j=>this.s(j).revealed&&this.abilityRole(j)==='hutao'))this.speak(j,'hutao');
       return true;
     }
     night() {
+      this.realNightCount=(this.realNightCount??Math.floor(this.flips/rules.nightEvery)-1)+1;
       this.log(`第${this.flips}次翻牌：夜幕降临。`);
       for(const i of this.aliveList(i=>this.s(i).revealed&&this.abilityRole(i)==='mizuki'))this.speak(i,'mizuki',[],true);
-      this.nightQueue=this.aliveList((i,s)=>['andrius','childe','magatsu','dvalin','apep'].includes(s.role)&&this.effective(i));this.processNight();
+      this.enqueueNight(false);this.processNight();
+    }
+    enqueueNight(extra) {
+      const actors=this.aliveList((i,s)=>this.evil(i)&&this.effective(i)&&(['andrius','childe','magatsu','dvalin','apep'].includes(s.role)||s.role==='thunder_manifestation'&&!s.thunderFirstNightDone&&(extra?this.realNightCount===0:this.realNightCount===1)));
+      this.nightQueue=[...actors.map(seat=>({seat,extra})),...(this.nightQueue||[])];
     }
     processNight() {
       while(this.nightQueue?.length&&this.phase==='playing'){
-        const a=this.nightQueue.shift();if(!this.effective(a))continue;
+        const entry=this.nightQueue.shift(),a=typeof entry==='number'?entry:entry.seat,extra=Boolean(entry.extra);if(!this.effective(a))continue;
         if(this.s(a).role==='magatsu'){
-          this.pendingNight={boss:a,required:Math.min(4,this.aliveList().length)};this.log('请为涡津御建鸣神命选择'+this.pendingNight.required+'个存活角色。');return;
+          this.pendingNight={boss:a,required:Math.min(4,this.aliveList().length),extra};this.log('请为涡津御建鸣神命选择'+this.pendingNight.required+'个存活角色。');return;
+        }
+        if(this.s(a).role==='thunder_manifestation'){
+          if(!extra)this.s(a).thunderFirstNightDone=true;
+          const t=this.pick(this.aliveList((i,s)=>s.revealed&&!this.evil(i)));
+          if(t)this.kill(t,'night',false,a);else this.log('雷音权现没有找到已翻开的善良角色。');this.checkEnd();continue;
         }
         if(this.s(a).role==='dvalin'){
           const goodTargets=this.shuffle(this.aliveList((i,s)=>!s.revealed&&!this.evil(i))).slice(0,2);
           const evilTargets=this.shuffle(this.aliveList((i,s)=>!s.revealed&&this.evil(i))).slice(0,1);
-          for(const j of [...goodTargets,...evilTargets]){if(this.nightImmune(j))this.log(`${j}号遭到夜袭，但存活了下来。`);else this.kill(j,'night');}
+          for(const j of [...goodTargets,...evilTargets]){if(this.nightImmune(j))this.log(`${j}号遭到夜袭，但存活了下来。`);else this.kill(j,'night',false,a);}
           this.damage(2,'裂空的魔龙的夜袭');this.checkEnd();continue;
         }
         const t=this.pick(this.aliveList((i,s)=>!s.revealed&&!this.evil(i)));
-        if(t){if(this.nightImmune(t))this.log(`${t}号遭到夜袭，但存活了下来。`);else this.kill(t,'night');}
+        if(t){if(this.nightImmune(t))this.log(`${t}号遭到夜袭，但存活了下来。`);else this.kill(t,'night',false,a);}
         else this.log('夜袭未找到未翻开的善良角色。');
         this.damage(2,'魔物的夜袭');this.checkEnd();
       }
@@ -307,9 +346,9 @@
     selectNight(targets) {
       const pending=this.pendingNight;if(!pending||this.phase!=='playing')return [false,'当前不需要选择夜晚目标。'];
       if(targets.length!==pending.required||new Set(targets).size!==targets.length||targets.some(j=>!this.s(j)?.alive))return [false,'请选择指定数量的不同存活角色。'];
-      const victims=this.shuffle(targets.filter(j=>this.s(j).role!=='magatsu'&&!this.nightImmune(j))).slice(0,2);
+      const victims=this.shuffle(targets.filter(j=>this.s(j).role!=='magatsu'&&!this.nightImmune(j)&&!this.evilKillProtected(j))).slice(0,2);
       this.pendingNight=null;
-      for(const j of victims){const good=!this.evil(j);this.kill(j,'night',true);if(good)this.damage(2,'夜间失去善良角色');}
+      for(const j of victims){const good=!this.evil(j),killed=this.kill(j,'night',true,pending.boss);if(good&&killed)this.damage(2,'夜间失去善良角色');}
       this.checkEnd();this.processNight();return [true];
     }
     reveal(i,manual=true) {
@@ -319,7 +358,7 @@
       if(!s)return [false,'无效座位。'];if(!s.alive)return [false,'该角色已死亡。'];if(s.revealed)return [false,'该角色已经翻开。'];if(this.blocked(i))return [false,'这个角色无法被翻开。'];
       s.revealed=true;if(manual)this.flips++;this.turn++;
       if(manual&&s.role==='pyro_slime'&&this.effective(i)){this.phase='lost';this.log('手动翻开了火史莱姆，调查失败。');return [true];}
-      if(s.role==='kairagi'&&this.effective(i)){const t=this.pick(this.aliveList(j=>!this.evil(j)&&this.effective(j)));if(t)this.kill(t,'kairagi');}
+      if(s.role==='kairagi'&&this.effective(i)){const t=this.pick(this.aliveList(j=>!this.evil(j)&&this.effective(j)));if(t)this.kill(t,'kairagi',false,i);}
       if(s.alive)this.speak(i);
       if(manual&&this.phase==='playing'&&this.flips%rules.nightEvery===0)this.night();this.checkEnd();return [true];
     }
@@ -330,25 +369,30 @@
         this.log(`阿佩普的绿洲守望者阻止了对${i}号的处决。`);this.damage(2,'试图处决受保护的喽喽');this.lastExecution.afterHp=this.hp;this.checkEnd();return [true];
       }
       // Capture reactions before death changes the actor's effective state.
-      const evil=this.evil(i),immune=this.hasAbility(i,'qiqi')&&this.canAct(i),yae=this.innateRole(i)==='yae',yaeReport=yae,lying=this.lies(i);
+      const evil=this.evil(i),immune=this.hasAbility(i,'qiqi')&&this.canAct(i),yae=this.innateRole(i)==='yae',yaeReport=yae,lying=this.lies(i),katheryne=this.hasAbility(i,'katheryne')&&this.canAct(i),fatui=s.role==='fatui'&&this.effective(i);
       const baseDamage=!evil&&!immune&&!yae?(s.role==='jack'||this.hasAbility(i,'timmie')?2:rules.mistakeDamage):0;
-      const extraDamage=!evil&&!immune&&!yae?(this.hasAbility(i,'qiqi')?4:s.role==='tian'?5:0):0;
-      this.lastExecution={seat:i,role:s.role,protected:immune,baseDamage,extraDamage,beforeHp:this.hp};
+      const extraDamage=!evil&&!immune&&!yae?(this.hasAbility(i,'qiqi')?4:this.hasAbility(i,'tian')?5:0):0;
+      const gongyiDamage=!evil&&!immune?3*this.aliveList(j=>this.s(j).revealed&&this.hasAbility(j,'gongyi')&&this.canAct(j)).length:0;
+      this.lastExecution={seat:i,role:s.role,protected:immune,baseDamage,extraDamage,gongyiDamage,beforeHp:this.hp};
       if(immune){this.lastExecution.afterHp=this.hp;this.log(`${i}号没有被处决死亡。`);return [true];}
       s.deathVersion=(s.deathVersion||0)+1;s.alive=false;s.death=typeof skill==='string'?skill:skill?'yelan':'execute';s.executionKnown=true;
       this.log(`${i}号被处决，身份是${roles[s.role].name}（${evil?'魔物':'天理'}）。`);
       if(baseDamage)this.damage(baseDamage,'误杀善良角色');if(extraDamage)this.damage(extraDamage,this.hasAbility(i,'qiqi')?'七七的额外惩罚':'天叔的额外惩罚');
+      if(gongyiDamage)this.damage(gongyiDamage,'公义的额外惩罚');
       if(yaeReport){const j=this.pick(this.aliveList(j=>lying?!this.evil(j):this.evil(j,true)));this.saveSpeech(i,j?`线索指向${j}号邪恶玩家。`:'当前没有可指认的存活邪恶玩家。',j?!lying:null,'yae',j?[j]:[]);}
       this.lastExecution.afterHp=this.hp;
-      this.checkEnd();return [true];
+      this.checkEnd();
+      if(this.phase==='playing'&&fatui){const j=this.pick(this.aliveList(j=>j!==i&&this.s(j).role==='fatui'));if(j)this.kill(j,'fatui',false,i);this.checkEnd();}
+      if(this.phase==='playing'&&katheryne){this.log('凯瑟琳被处决，魔物追加一次夜晚行动。');this.enqueueNight(true);this.processNight();}
+      return [true];
     }
     validateAbility(i,targets) {
       if(this.phase!=='playing')return [false,'本局已经结束。'];if(this.pendingNight)return [false,'请先完成夜晚选择。'];const s=this.s(i);
       if(!s?.alive||!s.revealed)return [false,'请选择已翻开且存活的角色。'];const id=this.abilityRole(i),role=roles[id];
       if(!role.targets)return [false,'这个角色没有主动技能。'];if(role.once&&s.used)return [false,'本局次数已用完。'];if(!this.targetCount(i)||targets.length!==this.targetCount(i))return [false,'目标数量不正确。'];
-      if(targets.some(j=>!this.s(j)||(id==='kirara'?this.s(j).revealed:id==='sigewinne'?this.s(j).alive:!this.s(j).alive)))return [false,id==='kirara'?'只能选择未翻开的角色。':id==='sigewinne'?'只能选择死亡角色。':'只能选择存活目标。'];if(new Set(targets).size!==targets.length)return [false,'请选择不同目标。'];
+      if(targets.some(j=>!this.s(j)||(id==='kirara'?this.s(j).revealed:id==='sigewinne'?this.s(j).alive:id==='dori'?this.s(j).revealed||!this.s(j).alive:!this.s(j).alive)))return [false,['kirara','dori'].includes(id)?'只能选择未翻开的角色。':id==='sigewinne'?'只能选择死亡角色。':'只能选择存活目标。'];if(new Set(targets).size!==targets.length)return [false,'请选择不同目标。'];
       if(id==='barbara'&&(targets[0]===i||this.s(targets[0]).speech?.truth==null))return [false,'请选择已有可判断真假的发言的其他角色。'];
-      if(id==='lyney'&&targets[0]===i)return [false,'林尼不能选择自己。'];return [true,id];
+      if(['lyney','lynette'].includes(id)&&targets[0]===i)return [false,roles[id].name+'不能选择自己。'];return [true,id];
     }
     use(i,targets) {
       const [ok,id]=this.validateAbility(i,targets);if(!ok)return [false,id];const s=this.s(i);if(roles[id].once)s.used=true;this.turn++;
@@ -363,6 +407,16 @@
         this.lastSkill={source:i,kind:id,targets:copy(targets),executions};
         this.saveSpeech(i,`已尝试处决${targets[0]}号角色；本次实际处决${executions.length?executions.map(j=>j+'号').join('、'):'未发生'}。`,null,id,targets);
       }
+      else if(id==='lynette'){
+        if(this.canAct(i)&&!this.evil(targets[0])){
+          const j=targets[0],original=this.mask(j);
+          for(const [seat,mask] of [[i,original],[j,'lynette']]){const t=this.s(seat);t.disguise=mask;if(t.mad)t.madMask=mask;t.lynetteMask=mask!==t.role;t.used=false;t.speech=null;delete t.doriTarget;}
+        }
+        this.saveSpeech(i,'已尝试与'+targets[0]+'号交换表面身份并重置技能机会。',null,id,targets);
+      }
+      else if(id==='dori'){
+        if(!this.disabled(i))s.doriTarget=targets[0];this.speak(i,id,targets);
+      }
       else if(id==='sigewinne'){
         const j=targets[0],t=this.s(j);
         if(this.canAct(i)&&!this.evil(j)){t.alive=true;t.used=false;t.death=null;delete t.deathMask;this.log(`${j}号被复活，技能使用机会已恢复。`);for(const observer of this.aliveList(j=>this.s(j).revealed&&this.abilityRole(j)==='hutao'))this.speak(observer,'hutao');}
@@ -376,6 +430,7 @@
           [s.used,t.used]=[t.used,s.used];[s.frozenTarget,t.frozenTarget]=[t.frozenTarget,s.frozenTarget];[s.novelTarget,t.novelTarget]=[t.novelTarget,s.novelTarget];
           [s.inheritedRole,t.inheritedRole]=[t.inheritedRole,s.inheritedRole];
           [s.rayTarget,t.rayTarget]=[t.rayTarget,s.rayTarget];[s.formerRole,t.formerRole]=[t.formerRole,s.formerRole];[s.aratakiOriginal,t.aratakiOriginal]=[t.aratakiOriginal,s.aratakiOriginal];
+          [s.frozenTargets,t.frozenTargets]=[t.frozenTargets,s.frozenTargets];[s.doriTarget,t.doriTarget]=[t.doriTarget,s.doriTarget];[s.lynetteMask,t.lynetteMask]=[t.lynetteMask,s.lynetteMask];
           if(s.role==='pyro_slime')this.unmaskSlime(s);if(t.role==='pyro_slime')this.unmaskSlime(t);
         }
         this.saveSpeech(i,'已尝试交换身份。',null,id,targets);
@@ -384,7 +439,7 @@
     }
     view(i) {
       const s=this.s(i);if(!s)return null;const ended=this.phase!=='playing',visible=s.revealed||s.executionKnown||ended;
-      const id=visible?(s.executionKnown||ended?s.role:this.mask(i)):null,role=roles[id];
+      const id=visible?(s.executionKnown&&!s.lynetteMask||ended?s.role:this.mask(i)):null,role=roles[id];
       const v={seat:i,alive:s.alive,revealed:s.revealed,roleId:id,name:role?.name||'未知角色',type:role?.type||null,effect:role?.effect||'先翻开角色，再点击详情查看效果与提示。',hint:role?.hint||'无',speech:s.revealed&&s.speech?s.speech.text:'',used:s.used,death:s.death};
       if(ended){const statuses=[];if(s.drunk)statuses.push('醉酒');if(this.isPoisoned(i))statuses.push('中毒');if(s.mad)statuses.push('疯狂');v.summary=`${roles[s.role].name} · ${this.evil(i)?'魔物':'天理'} · ${statuses.join('/')||'正常'}`;v.evil=this.evil(i);}
       return v;
@@ -401,6 +456,7 @@
       if(s.pendingNight&&(!Number.isInteger(s.pendingNight.boss)||s.seats[s.pendingNight.boss-1]?.role!=='magatsu'||!Number.isInteger(s.pendingNight.required)||s.pendingNight.required<1||s.pendingNight.required>4))throw Error('夜晚存档无效');
       const game=Object.assign(Object.create(GameEngine.prototype),copy(s),{hp:Math.min(s.hp,maxHp)}).upgradeSpeechText();
       game.seats.forEach(seat=>{if(seat.role==='pyro_slime')game.unmaskSlime(seat);});
+      game.realNightCount??=Math.floor(game.flips/rules.nightEvery);
       if(!game.onceUsageVersion){
         game.seats.forEach((seat,j)=>{
           if(game.abilityRole(j+1)!=='mona'||seat.used||!seat.history.some(h=>h.kind==='mona'&&h.targets?.length===2))return;
@@ -421,7 +477,10 @@
       const extraArataki=Number(s.quantities.NPC+extraMinion>0&&s.roleIds.includes('arataki'));
       const adjustments=extraMinion+extraArataki;
       if(s.quantities['冒险者']<adjustments||s.roleIds.filter(id=>roles[id].type==='NPC').length<s.quantities.NPC+adjustments)throw Error('镀金旅团／荒泷派小弟需要预留额外NPC候选和冒险者名额。');
-      if(s.quantities['喽喽']>0&&s.roleIds.includes('hunters_ray')&&s.quantities['冒险者']-adjustments<1)throw Error('猎刀鳐需要预留至少一名实际登场的冒险者。');
+      const guaranteedSignora=s.roleIds.includes('signora')&&s.quantities['强敌']===s.roleIds.filter(id=>roles[id].type==='强敌').length;
+      if(!guaranteedSignora&&s.quantities['喽喽']>0&&s.roleIds.includes('hunters_ray')&&s.quantities['冒险者']-adjustments<1)throw Error('猎刀鳐需要预留至少一名实际登场的冒险者。');
+      if(s.quantities['强敌']>0&&s.roleIds.includes('signora')&&(s.quantities['喽喽']>Math.floor(s.seats/2)||s.quantities['强敌']>s.seats-Math.floor(s.seats/2)))throw Error('该配板无法同时满足女士的多数愚人众与保留强敌规则。');
+      if(s.quantities['强敌']>0&&s.roleIds.includes('signora')&&!adventurers.length&&s.seats-Math.floor(s.seats/2)-s.quantities['强敌']<=0)throw Error('女士转化后没有可用NPC身份，请额外勾选一名冒险者供伪装。');
       if(s.roleIds.includes('yae')&&adventurers.length<2)throw Error('勾选八重神子时，还需勾选至少一名其他冒险者供其伪装。');
       if(s.roleIds.includes('hanachirusato')&&!adventurers.length)throw Error('勾选花散里时，至少需要一名冒险者供其继承。');
       if(!s.roleIds.some(id=>good(id)&&id!=='jack'))throw Error('剧本至少需要一个可用于伪装的善良身份（杰克除外）。');return copy(s);
